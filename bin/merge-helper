@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Merging two branches that have diverged a while ago can be painful
+# when there are many conflicting changes. If you've been working on a
+# new feature on feature_branch and haven't merged in master_branch
+# for a while, if you do `git merge master_branch`, then you have to
+# resolve all conflicts caused by all changes in master_branch at once.
+# This can be overwhelming and error prone if there are a lot of
+# different causes of conflicts.
+#
+# If you were to do `git rebase feature_branch master_branch` this would
+# replay commits from master_branch onto feature_branch one at a time,
+# stopping when there is a conflict that can't be resolved automatically,
+# giving you a chance to fix that conflict before proceeding. This
+# is much less cognitive load and therefore should be less error-prone
+# and easier to review. Unfortunately, this mangles the history of
+# master_branch, which is not acceptable.
+#
+# This script attempts to solve the cognitive load issue of resolving
+# conflicts and reviewing the resolution by finding the first commit in
+# master_branch from the point feature_branch diverged from it that
+# causes a conflict that needs manual resolution, then starting
+# merge and leaving it for the user to resolve. Performed iteratively, it
+# should result in master_branch fully merged into feature_branch,
+# with merge commits for each manually resolved conflict.
+
+feature_branch="$1"
+master_branch="$2"
+
+# Find the common ancestor commit
+common_ancestor=$(git merge-base $feature_branch $master_branch)
+
+# List all commits on the master branch since the common ancestor
+# --first-parent is required to not follow both sides of a merge
+# in the master_branch history, which should ignore the individual
+# commits on branches being merged into master_branch.
+commits=$(git log --format=oneline --first-parent --reverse $common_ancestor..$master_branch)
+
+# Loop through each commit and attempt a dry-run merge with the feature branch
+echo "$commits" | while IFS= read -r commit; do
+    commit_hash=$(echo $commit | awk '{print $1}')
+    commit_message=$(echo $commit | cut -d' ' -f2-)
+
+    git checkout $feature_branch
+	echo "Attempting to merge $commit_hash $commit_message"
+    git merge --no-commit $commit_hash
+
+    # Check for conflicts
+    if git diff --check --exit-code; then
+        echo "No conflicts for commit: $commit_message ($commit_hash)"
+    else
+        echo "Found conflicting commit: $commit_message ($commit_hash)"
+		echo "Please perform manual conflict resolution and then run git merge --continue, with a descriptive message for what conflict was resolved, before running this script again."
+		exit 1
+    fi
+
+	git merge --abort
+done
+
+git checkout $feature_branch
+echo "Attempting to merge of final commit $commit_hash $commit_message"
+git merge $commit_hash
