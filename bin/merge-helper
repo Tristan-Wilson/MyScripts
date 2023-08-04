@@ -59,4 +59,4 @@ done
 
 git checkout $feature_branch
 echo "Attempting to merge of final commit $commit_hash $commit_message"
-git merge $commit_hash
+git merge $feature_branch $master_branch
